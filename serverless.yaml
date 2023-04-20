@@ -1,0 +1,21 @@
+service: service-kabeli
+
+useDotenv: true
+
+plugins: 
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: nodejs16.x
+  environment:
+    PORT: ${env:PORT}
+
+functions:
+  main:
+    handler: dist/serverless.handler
+    events:
+      - http:
+          path: /dev
+          method: get
+
