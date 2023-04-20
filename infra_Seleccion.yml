@@ -1,0 +1,238 @@
+escription: >
+  Script to create a SSL certificate, S3 bucket and Cloudfront distribution.
+
+  ###############################################################################
+Parameters:
+  ###############################################################################
+
+  ProjectName:
+    Type: String
+    Description: Name Value to Resources
+    Default: demo
+      # DomainName:
+      #   Type: String
+      #   Description: The domain name.
+    ApiName:
+      Type: String
+    Description: Api name.
+    Default: 'api_name_replace'    
+    Subnet:
+      Type: AWS::EC2::Subnet::Id
+    Description: Select a Subnet
+    Vpc:
+      Type: AWS::EC2::VPC::Id
+    Description: Select VPC
+      ###### SE DEBE CREAR SI O SI UNA KEYPAIR A MANO ANTES DE EJECUTAR ESTE TEMPLATE ########    
+    KeyName:
+      Description: SE DEBE CREAR SI O SI UNA KEYPAIR A MANO ANTES DE EJECUTAR ESTE TEMPLATE
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+    Puerto:
+      Description: puerto de exposición de app desarrollada, considerar que es el puerto del backend.!And 
+    Type: String
+    Default: 8080
+    MyIP:
+      Description: The IP address that can be used to SSH Bastion Host
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: '172.18.1.0/32'
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.      
+
+    Mappings:    
+    AWSRegionArch2AMI:
+      us-east-1:
+        PV64: ami-2a69aa47
+      HVM64: ami-6869aa05
+      HVMG2: ami-50b4f047
+
+        ###############################################################################
+      Resources:
+        ###############################################################################
+        CloudFrontDistribution:
+          Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Comment: !Ref ProjectName
+        DefaultCacheBehavior:
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+          TargetOriginId: the-s3-bucket
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 300
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCachingMinTTL: 300
+            ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        Enabled: true
+        HttpVersion: http2
+        Origins:
+          - DomainName: !Join ['', [!Ref Bucket, '.s3.amazonaws.com']]
+            Id: the-s3-bucket
+            S3OriginConfig:
+              OriginAccessIdentity:
+                !Join ['', ['origin-access-identity/cloudfront/', !Ref CloudFrontOriginAccessIdentity]]
+        PriceClass: PriceClass_All
+
+      CloudFrontOriginAccessIdentity:
+        Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+      Properties:
+        CloudFrontOriginAccessIdentityConfig:
+          Comment: !Sub 'CloudFront OAI for ${ProjectName}'
+
+      Bucket:
+        Type: 'AWS::S3::Bucket'
+      Properties:
+        VersioningConfiguration:
+          Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      AccessControl: Private
+      BucketName: !Join ['-', [!Ref 'AWS::AccountId',!Ref ProjectName]]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls       : true
+        BlockPublicPolicy     : true
+        IgnorePublicAcls      : true
+        RestrictPublicBuckets : true
+      Tags:
+        - Key: 'Proyecto'
+          Value: !Ref ProjectName
+
+      BucketPolicy:
+        Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref Bucket
+      PolicyDocument:
+        Statement:
+          - Action:
+            - s3:GetObject
+            Effect: Allow
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref Bucket, '/*']]
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+      RestApi:
+        Type: 'AWS::ApiGateway::RestApi'
+      Properties:
+        Description: !Join [ "", [ !Ref ApiName ] ]
+      Name: !Join ["", [!Ref ApiName]]
+      Parameters:
+        endpointConfigurationTypes: EDGE        
+      RestApiMockMethod:
+        Type: 'AWS::ApiGateway::Method'
+      Properties:
+        RestApiId: !Ref RestApi
+      ResourceId: !GetAtt 
+        - RestApi
+        - RootResourceId
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+      RestApiDeployment:
+        Type: AWS::ApiGateway::Deployment
+      DependsOn: 
+      - RestApi
+      - RestApiMockMethod
+      Properties:
+        RestApiId: !Ref RestApi
+      Description: First deployment with a mock method
+      StageName: replaceme
+      MyVpcLink:
+        DependsOn: MyLoadBalancer
+      Type: AWS::ApiGateway::VpcLink
+      Properties:
+        Description: Vpc Link to Grant Access to Backend
+        Name: 'vpcdemo'
+        TargetArns:
+          - !Ref MyLoadBalancer
+      MyLoadBalancer:
+        DependsOn: Ec2Instance
+      Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+      Properties:
+        Type: network
+        Scheme: internal
+        Name: !Ref ProjectName
+        Subnets:
+          - !Ref Subnet
+      SecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: 'Security Group'
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name 
+          Value: SG001 
+
+      IngressRule01:
+        Type: AWS::EC2::SecurityGroupIngress
+      Properties:
+        Description: 'Allow SSH from MyIP'
+      GroupId: !Ref SecurityGroup
+      CidrIp: !Ref MyIP
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22 
+
+        # EgressRule01:
+        #   Type: AWS::EC2::SecurityGroupEgress
+        #   Properties:
+        #     Description: 'Outbund Rule'
+        #     GroupId: !Ref SecurityGroup
+        #     CidrIp: 0.0.0.0/0
+        #     IpProtocol: tcp
+        #     FromPort: 0
+        #     ToPort: 65535
+
+      Ec2Instance:
+        Type: AWS::EC2::Instance
+      Properties:
+        SubnetId: !Ref Subnet
+      ImageId:
+        Fn::FindInMap:
+          - AWSRegionArch2AMI
+          - Ref: 'AWS::Region'
+          - HVM64
+      InstanceType: t2.small
+      KeyName: !Ref KeyName
+      Tenancy: default
+      SecurityGroupIds:
+        - !Ref SecurityGroup            
+      MyTargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+      DependsOn: Ec2Instance
+      Properties:
+        VpcId: !Ref Vpc
+      Protocol: TCP
+      Port: !Ref Puerto
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 15
+      HealthCheckPort: !Ref Puerto
+      HealthCheckProtocol: TCP
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 2
+      Name: demo-test-ec2
+      TargetType: instance
+      Targets:
+        - Id: !Ref Ec2Instance
+      Listener:    
+      DependsOn: 
+      - MyTargetGroup
+      - MyLoadBalancer
+      Type: AWS::ElasticLoadBalancingV2::Listener   
+      Properties: 
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup          
+      LoadBalancerArn: !Ref MyLoadBalancer
+      Port: !Ref Puerto
+      Protocol: TCP
+
